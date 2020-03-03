@@ -1,0 +1,1 @@
+l_default_root_paths = ['c:\\', 'd:\\']
