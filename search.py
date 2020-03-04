@@ -2,89 +2,95 @@
 from os import walk
 from re import search
 from time import perf_counter
-from settings import l_default_root_paths
+from multiprocessing import Pool
+from win32api import GetLogicalDriveStrings
+
+l_default_root_paths = GetLogicalDriveStrings().split('\000')[:-1]
+s_default_path_filter = ''
+s_default_query = ''
+i_default_filter_flag = 0
+i_default_parallel = 1
 
 __test__ = True
 log = lambda *args, **kwargs: print(*args, **kwargs) if __test__ else None
 
 class Search:
     def __init__(self):
-        self.root_paths         = self.get_root_paths()
-        self.dir_filter         = self.get_dir_filter()
-        self.query, self._query = self.get_query()
-        self.filter_flag        = self.get_filter_flag()
-        self.timer              = 0
+        self.root_paths    = self.get_root_paths()
+        self.path_filter   = self.get_path_filter()
+        self.e_path_filter = self.edit_regex(self.path_filter)
+        self.query         = self.get_query()
+        self.filter_flag   = self.get_filter_flag()
+        self.parallel      = self.get_parallel()
+        self.timer         = 0
 
     def get_root_paths(self):
         '''Add one or more rootpaths separated by coma (optional). Default '''
-        s_input = input('enter root-paths (e.g.: c:\, d:\): ')
+        s_input = input('enter root-paths: ')
         l_paths = []
         if s_input: l_paths = [s_input]
         if ',' in s_input: l_paths = [path.strip() for path in s_input.split(',') if path.strip()]
         return l_paths or l_default_root_paths
 
-    def get_dir_filter(self):
+    def get_path_filter(self):
         '''Add directories filter (optional). Takes regular expresion as input.'''
-        s_input = input('enter dir-filter (regex): ')
-        s_modified_input = self.modify_input(s_input)
-        return s_modified_input
+        return input('enter dir-filter (regex): ') or s_default_path_filter
 
     def get_query(self):
         '''Add search query (optional). Takes regular expresion as input.'''
-        s_input = input('enter search-query (regex): ')
-        s_modified_input = self.modify_input(s_input)
-        return s_input, s_modified_input
+        return input('enter search-query (regex): ') or s_default_query
 
-    def modify_input(self, s_input):
-        '''Modified input is nesessary for matching dir names in paths otherwise only '^.*$' dirs will be matched'''
-        if not s_input: 
-            return ''
-        s_modified_input = s_input
-        if s_input[0] == '^': 
-            s_modified_input = s_input[1:]
-        if s_input[-1] == '$':
-            s_modified_input = s_input[:-1]
-        return s_modified_input
+    def edit_regex(self, regex):
+        '''Edited regex is used for faster dir names lookup in paths.'''
+        return regex[regex[0]=='^' : -(regex[-1]=='$') or None] if regex else ''
 
     def get_filter_flag(self):
         '''Add search flag (optional): d for dirs-only, f for file-only.'''
         s_input = input('enter search-flag ([int], 0:all, 1:dirs-only, 2:files-only): ')
-        i_input = 0
-        if s_input and s_input.isdigit() and int(s_input):
+        i_input = i_default_filter_flag
+        if s_input and s_input.isdigit() and int(s_input) != i_input:
             i_input = int(s_input)
         return i_input
 
+    def get_parallel(self):
+        s_input = input('use multiprocessing (0,1): ')
+        if s_input and s_input.isdigit():
+            return int(s_input[0])
+        else:
+            return i_default_parallel
+
     def scan_root_path(self, root_path):
-        counter = 1
-        for root, dirs, files in walk(root_path):
-            self.scan_dirs_files(root, dirs, files)
+        list(map(self.scan_dirs_files, walk(root_path)))
 
-    def scan_dirs_files(self, root, dirs, files):
-        format_flag = True # format_flag is used to produce less output
-        if search(self._query, ''.join(dirs + files)) and search(self.dir_filter, root):
-            if self.filter_flag != 2:
-                format_flag = self.scan_elements(root, self.query, dirs, 'dir', format_flag)
-            if self.filter_flag != 1:
-                format_flag = self.scan_elements(root, self.query, files, 'file', format_flag)
-
-    def scan_elements(self, root, query, array, query_type, format_flag):
-        got_results = False
-        for element in array:
-            if search(query, element):
-                got_results = True
-                if format_flag:
-                    print(root)
-                    format_flag = False
-                print(f'    {query_type}:', element)
-        if got_results:
+    def scan_dirs_files(self, root_tuple):
+        root, dirs, files = root_tuple
+        if self.e_path_filter not in root:
+            return
+        path_match = [r for r in root.split('\\') if search(self.path_filter, r)]
+        if not path_match:
+            return
+        dirs_match  = [d for d in dirs  if search(self.query, d)]
+        files_match = [f for f in files if search(self.query, f)]
+        if (dirs_match and self.filter_flag != 2) or (files_match and self.filter_flag != 1):
             print('-' * 50)
-        return format_flag
+            print(root)
+        if dirs_match and self.filter_flag != 2:
+            print('  dirs:\n    ', end='')
+            print(*dirs_match, sep='\n    ')
+        if files_match and self.filter_flag != 1:
+            print('  files:\n    ', end='')
+            print(*files_match, sep='\n    ')
 
     def start(self):
         print('searching...')
         self.time = perf_counter()
-        for root_path in self.root_paths:
-            self.scan_root_path(root_path)
+        if self.parallel:
+            p = Pool()
+            p.map(self.scan_root_path, self.root_paths)
+            p.close()
+            p.join()
+        else:
+            list(map(self.scan_root_path, self.root_paths))
         self.time = perf_counter() - self.time
         print(f'\ndone in {self.time}\n')
 
@@ -108,4 +114,12 @@ def main():
     search.start()
             
 if __name__ == '__main__':
+    print(('='*50) + '\nSIMPLE SEARCH multiprocessing version\n')
+    print(f'''Defaults: 
+    {l_default_root_paths=}
+    {s_default_path_filter=}
+    {s_default_query=}
+    {i_default_filter_flag=}
+    {i_default_parallel=}''')
+    print('='*50)
     main()
