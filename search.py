@@ -24,36 +24,46 @@ class Search:
         self.parallel      = self.get_parallel()
         self.timer         = 0
 
+    def timeit(func):
+        def wrapper(self, *args, **kwargs):
+            self.time = perf_counter()
+            value = func(self, *args, **kwargs)
+            self.time = perf_counter() - self.time
+            print(f'\nDone in {int(self.time)} seconds.\n')
+            return value
+        return wrapper
+
     def get_root_paths(self):
-        '''Add one or more rootpaths separated by coma (optional). Default '''
-        s_input = input('enter root-paths: ')
+        '''Add one or more rootpaths separated by semicolons (optional). Default '''
+        s_input = input('Enter root-paths. Example: c:\Program Files; d:\\\n: ')
         l_paths = []
         if s_input: l_paths = [s_input]
-        if ',' in s_input: l_paths = [path.strip() for path in s_input.split(',') if path.strip()]
+        if ';' in s_input: l_paths = [path.strip() for path in s_input.split(';') if path.strip()]
         return l_paths or l_default_root_paths
 
     def get_path_filter(self):
-        '''Add directories filter (optional). Takes regular expresion as input.'''
-        return input('enter dir-filter (regex): ') or s_default_path_filter
+        '''Add path-filter (optional). Takes regular expresion as input.'''
+        return input('Enter path-filter (regex). Example: .*[Uu]ser.*\n: ') or s_default_path_filter
 
     def get_query(self):
         '''Add search query (optional). Takes regular expresion as input.'''
-        return input('enter search-query (regex): ') or s_default_query
+        return input('Enter search-query (regex). Example: \.(mp3|wav)$\n: ') or s_default_query
 
     def edit_regex(self, regex):
         '''Edited regex is used for faster dir names lookup in paths.'''
         return regex[regex[0]=='^' : -(regex[-1]=='$') or None] if regex else ''
 
     def get_filter_flag(self):
-        '''Add search flag (optional): d for dirs-only, f for file-only.'''
-        s_input = input('enter search-flag ([int], 0:all, 1:dirs-only, 2:files-only): ')
+        '''Add search flag (optional): 1 for dirs-only, 2 for file-only.'''
+        s_input = input('enter search-flag ([int], 0:all, 1:dirs-only, 2:files-only)\n: ')
         i_input = i_default_filter_flag
         if s_input and s_input.isdigit() and int(s_input) != i_input:
             i_input = int(s_input)
         return i_input
 
     def get_parallel(self):
-        s_input = input('use multiprocessing (0,1): ')
+        '''Add multiprocessing support (optional). Root-paths will be scaned in parallel. '''
+        s_input = input('Use multiprocessing (0:no, 1:yes)\n: ')
         if s_input and s_input.isdigit():
             return int(s_input[0])
         else:
@@ -81,9 +91,10 @@ class Search:
             print('  files:\n    ', end='')
             print(*files_match, sep='\n    ')
 
+    @timeit
     def start(self):
         print('searching...')
-        self.time = perf_counter()
+        #self.time = perf_counter()
         if self.parallel:
             p = Pool()
             p.map(self.scan_root_path, self.root_paths)
@@ -91,8 +102,8 @@ class Search:
             p.join()
         else:
             list(map(self.scan_root_path, self.root_paths))
-        self.time = perf_counter() - self.time
-        print(f'\ndone in {self.time}\n')
+        #self.time = perf_counter() - self.time
+        #print(f'\nDone in {int(self.time)} seconds.\n')
 
 #-----------------end of search class-----------------
 
@@ -100,7 +111,7 @@ def restart(func):
     def wrapper(*args, **kwargs):
         try:
             result = func(*args, **kwargs)
-            input('press any key to continue')
+            input('Press any key to continue...')
             raise Exception('restart')
         except Exception as e:
             if 'restart' not in str(e): 
