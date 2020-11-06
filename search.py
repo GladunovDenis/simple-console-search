@@ -1,136 +1,189 @@
 # python 3.8.1
 from os import walk
-from re import search
-from time import perf_counter
-from multiprocessing import Pool
+from re import match, search
+from timeit import timeit
 from win32api import GetLogicalDriveStrings
 
-l_default_root_paths = GetLogicalDriveStrings().split('\000')[:-1]
-s_default_path_filter = ''
-s_default_query = ''
-i_default_filter_flag = 0
-i_default_parallel = 1
 
-__test__ = True
-log = lambda *args, **kwargs: print(*args, **kwargs) if __test__ else None
+
+
+
+
+default_root_paths = GetLogicalDriveStrings().split('\000')[:-1]
+default_path_filter = r''
+default_query = r''
+default_filter_flag = 0
+default_parallel = 1
+
+
+
+
+
+notNone = lambda val, method: val if val != None else method()
 
 class Search:
-    def __init__(self):
-        self.root_paths    = self.get_root_paths()
-        self.path_filter   = self.get_path_filter()
-        self.e_path_filter = self.edit_regex(self.path_filter)
-        self.query         = self.get_query()
-        self.filter_flag   = self.get_filter_flag()
-        self.parallel      = self.get_parallel()
-        self.timer         = 0
+    def __init__(
+        self,
+        root_paths  = None,
+        path_filter = None,
+        query       = None,
+        filter_flag = None,
+    ):
+        self.root_paths  = notNone(root_paths,  self.get_root_paths)
+        self.path_filter = notNone(path_filter, self.get_path_filter)
+        self.query       = notNone(query,       self.get_query)
+        self.filter_flag = notNone(filter_flag, self.get_filter_flag)
+        self.report      = ''
+        
 
-    def timeit(func):
-        def wrapper(self, *args, **kwargs):
-            self.time = perf_counter()
-            value = func(self, *args, **kwargs)
-            self.time = perf_counter() - self.time
-            print(f'\nDone in {int(self.time)} seconds.\n')
-            return value
-        return wrapper
 
     def get_root_paths(self):
-        '''Add one or more rootpaths separated by semicolons (optional). Default '''
-        s_input = input('Enter root-paths. Example: c:\Program Files; d:\\\n: ')
-        l_paths = []
-        if s_input: l_paths = [s_input]
-        if ';' in s_input: l_paths = [path.strip() for path in s_input.split(';') if path.strip()]
-        return l_paths or l_default_root_paths
+        message = """
+You can add one or more rootpaths separated by semicolons.
+Program will scan only these paths.
+
+Example: c:\Program Files; 
+Example: d:\\
+Example: c:\\; d:\\; e:\\Documents
+
+[+] """
+        userinput = input(message)
+        paths = default_root_paths
+        if userinput: 
+            paths = [path.strip() for path in userinput.split(';') if path.strip()]
+        print(paths)
+        return paths
+
 
     def get_path_filter(self):
-        '''Add path-filter (optional). Takes regular expresion as input.'''
-        return input('Enter path-filter (regex). Example: .*[Uu]ser.*\n: ') or s_default_path_filter
+        message = """
+You can Add path-filter. 
+Takes python regex string as input.
+
+Example: files
+Example: .*[Pp]rogram files( \(x86\))?
+
+[+] """
+        regex = default_path_filter
+        userinput = input(message)
+        if userinput:
+            start = userinput[0] == '^' # 0 or 1
+            end   = -(userinput[-1]=='$') or None # -1 or None
+            regex = userinput[start : end]
+        print(regex)
+        return regex
 
     def get_query(self):
-        '''Add search query (optional). Takes regular expresion as input.'''
-        return input('Enter search-query (regex). Example: \.(mp3|wav)$\n: ') or s_default_query
+        message = """
+You can add search query (optional). 
+Takes python regex as input.
 
-    def edit_regex(self, regex):
-        '''Edited regex is used for faster dir names lookup in paths.'''
-        return regex[regex[0]=='^' : -(regex[-1]=='$') or None] if regex else ''
+Example: music
+Example: \.(mp3|wav)$
+
+[+] """
+        query = default_query
+        userinput = input(message)
+        if userinput:
+            query = userinput 
+        print(query)
+        return query
+        
 
     def get_filter_flag(self):
-        '''Add search flag (optional): 1 for dirs-only, 2 for file-only.'''
-        s_input = input('enter search-flag ([int], 0:all, 1:dirs-only, 2:files-only)\n: ')
-        i_input = i_default_filter_flag
-        if s_input and s_input.isdigit() and int(s_input) != i_input:
-            i_input = int(s_input)
-        return i_input
+        message = """
+You can add one search flag (optional)
+d/f/e (d: dirs-only, f: files-only, e: everything,)
 
-    def get_parallel(self):
-        '''Add multiprocessing support (optional). Root-paths will be scaned in parallel. '''
-        s_input = input('Use multiprocessing (0:no, 1:yes)\n: ')
-        if s_input and s_input.isdigit():
-            return int(s_input[0])
-        else:
-            return i_default_parallel
+Example: d
+Example: f
+
+[+] """
+        userinput = input(message)
+        flag = default_filter_flag
+        if userinput:
+            index = "edf".find(userinput)
+            if index >= 0:
+                flag = index
+        print("edf"[flag])
+        return flag
+
+
+    def genetate_report(self, name, data):
+        match_str = '\n    '.join(data)
+        self.report = f"""{self.report}  {name}:
+    {match_str}
+"""
+
 
     def scan_root_path(self, root_path):
-        list(map(self.scan_dirs_files, walk(root_path)))
-
-    def scan_dirs_files(self, root_tuple):
-        root, dirs, files = root_tuple
-        if self.e_path_filter not in root:
-            return
-        path_match = [r for r in root.split('\\') if search(self.path_filter, r)]
-        if not path_match:
-            return
-        dirs_match  = [d for d in dirs  if search(self.query, d)]
-        files_match = [f for f in files if search(self.query, f)]
-        if (dirs_match and self.filter_flag != 2) or (files_match and self.filter_flag != 1):
-            print('-' * 50)
-            print(root)
-        if dirs_match and self.filter_flag != 2:
-            print('  dirs:\n    ', end='')
-            print(*dirs_match, sep='\n    ')
-        if files_match and self.filter_flag != 1:
-            print('  files:\n    ', end='')
-            print(*files_match, sep='\n    ')
-
-    @timeit
-    def start(self):
-        print('searching...')
-        #self.time = perf_counter()
-        if self.parallel:
-            p = Pool()
-            p.map(self.scan_root_path, self.root_paths)
-            p.close()
-            p.join()
+        if self.filter_flag == 1:
+            if self.path_filter and self.query:
+                query = f"({self.path_filter}|{self.query})"
+            else:
+                query = self.path_filter or self.query
+            [print(values[0]) for values in walk(root_path) if match(query, values[0].rpartition('\\')[-1])]
+        elif self.path_filter:
+            [self.scan_dirs_and_files(values) for values in walk(root_path) \
+                if search(self.path_filter, values[0].rpartition('\\')[-1])]
         else:
-            list(map(self.scan_root_path, self.root_paths))
-        #self.time = perf_counter() - self.time
-        #print(f'\nDone in {int(self.time)} seconds.\n')
+            list(map(self.scan_dirs_and_files, walk(root_path)))
+
+    def scan_dirs_and_files(self, values):
+        root, dirs, files = values
+
+        conditionC, conditionD = False, False
+
+        if self.filter_flag != 2:
+            dirs_match  = [dir for dir in dirs if search(self.query, dir)]
+            conditionC = bool(dirs_match)
+            if conditionC:
+                self.genetate_report("dirs", dirs_match)
+
+        if self.filter_flag != 1:
+            files_match = [file for file in files if search(self.query, file)]
+            conditionD = bool(files_match)
+            if conditionD:
+                self.genetate_report("files", files_match)
+        if conditionC or conditionD:
+            self.report = f"""----------------------------------
+{root}
+{self.report}
+"""
+            print(self.report)
+
+
+
+    def begin(self):
+        print('searching...\n')
+        [self.scan_root_path(path) for path in self.root_paths]
+        
 
 #-----------------end of search class-----------------
 
 def restart(func):
     def wrapper(*args, **kwargs):
-        try:
-            result = func(*args, **kwargs)
-            input('Press any key to continue...')
-            raise Exception('restart')
-        except Exception as e:
-            if 'restart' not in str(e): 
-                print('Exception:', e)
-            wrapper(*args, **kwargs)
+        result = func(*args, **kwargs)
+        input('Press any key to continue...')
+        wrapper(*args, **kwargs)
     return wrapper
+
 
 @restart
 def main():
     search = Search()
-    search.start()
+    t = timeit(search.begin, number=1)
+    print("Execution time:", t)
+
+
             
 if __name__ == '__main__':
-    print(('='*50) + '\nSIMPLE SEARCH multiprocessing version\n')
+    print(('='*50) + '\nSIMPLE SEARCH\n')
     print(f'''Defaults: 
-    {l_default_root_paths=}
-    {s_default_path_filter=}
-    {s_default_query=}
-    {i_default_filter_flag=}
-    {i_default_parallel=}''')
+    default_root_paths  = {default_root_paths}
+    default_path_filter = {default_path_filter}
+    default_query       = {default_query}
+    default_filter_flag = {default_filter_flag}
+''')
     print('='*50)
     main()
